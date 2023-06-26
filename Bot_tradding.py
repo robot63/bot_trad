@@ -1,57 +1,77 @@
 import cbpro
-import numpy as np
 import time
-from config import API_KEY, API_SECRET, API_PASSPHRASE
 
-public_client = cbpro.PublicClient()
+import json
+
+# Chemin vers le fichier de configuration
+config_file = '/path/to/config.json'
+
+# Charger les clés d'API à partir du fichier de configuration
+with open(config_file) as f:
+    config = json.load(f)
+    API_KEY = config['api_key']
+    API_SECRET = config['api_secret']
+    API_PASSPHRASE = config['api_passphrase']
+
+# Initialisation du client Coinbase
 auth_client = cbpro.AuthenticatedClient(API_KEY, API_SECRET, API_PASSPHRASE)
 
-# Paramètres du bot
-PAIR = 'REN-USD'
-BUY_AMOUNT = 100
-SELL_AMOUNT = 100
-SMALL_WINDOW = 50
-BIG_WINDOW = 200
 
-# Fonction pour calculer les moyennes mobiles
-def calculate_rolling_average(data, window_size):
-    weights = np.repeat(1.0, window_size) / window_size
-    smas = np.convolve(data, weights, 'valid')
-    return smas
+# Fonction pour placer un ordre d'achat
+def place_buy_order(product_id, amount, price):
+    response = auth_client.place_limit_order(
+        product_id=product_id,
+        side='buy',
+        price=price,
+        size=amount
+    )
+    return response
 
-# Fonction pour exécuter un ordre d'achat
-def buy(currency_pair, amount):
-    order = auth_client.place_market_order(product_id=currency_pair, side='buy', funds=amount)
-    return order
+# Fonction pour placer un ordre de vente
+def place_sell_order(product_id, amount, price):
+    response = auth_client.place_limit_order(
+        product_id=product_id,
+        side='sell',
+        price=price,
+        size=amount
+    )
+    return response
 
-# Fonction pour exécuter un ordre de vente
-def sell(currency_pair, amount):
-    order = auth_client.place_market_order(product_id=currency_pair, side='sell', size=amount)
-    return order
+# Fonction pour récupérer le solde disponible
+def get_available_balance(currency):
+    accounts = auth_client.get_accounts()
+    for account in accounts:
+        if account['currency'] == currency:
+            return float(account['available'])
 
-# Boucle principale du bot
-while True:
-    # Récupération des données de prix les plus récentes
-    ticker_data = public_client.get_product_ticker(product_id=PAIR)
-    current_price = float(ticker_data['price'])
-    
-    # Récupération des données de prix historiques
-    historical_data = public_client.get_product_historic_rates(product_id=PAIR, granularity=60)
-    prices = np.array([float(d[4]) for d in historical_data])
-    
-    # Calcul des moyennes mobiles
-    small_rolling_average = calculate_rolling_average(prices, SMALL_WINDOW)
-    big_rolling_average = calculate_rolling_average(prices, BIG_WINDOW)
-    
-    # Détermination du signal de trading
-    if small_rolling_average[-1] > big_rolling_average[-1] and small_rolling_average[-2] < big_rolling_average[-2]:
-        # Acheter
-        buy_order = buy(PAIR, BUY_AMOUNT)
-        print('Achat effectué:', buy_order)
-    elif small_rolling_average[-1] < big_rolling_average[-1] and small_rolling_average[-2] > big_rolling_average[-2]:
-        # Vendre
-        sell_order = sell(PAIR, SELL_AMOUNT)
-        print('Vente effectuée:', sell_order)
-    
-    # Attendre un certain temps avant de rafraîchir les données
-    time.sleep(30)
+    return 0.0
+
+# Fonction principale du bot de trading
+def run_trading_bot():
+    product_id = 'RNDR-USD'  # Paire de trading RNDR-USD
+    trade_amount = 10.0  # Montant de chaque transaction
+    buy_price = 0.5  # Prix d'achat
+    sell_price = 1.0  # Prix de vente
+
+    while True:
+        # Vérifier le solde disponible
+        available_balance = get_available_balance('USD')
+
+        # Vérifier si suffisamment de fonds sont disponibles pour placer un ordre d'achat
+        if available_balance >= trade_amount * buy_price:
+            # Placer un ordre d'achat
+            buy_order = place_buy_order(product_id, trade_amount, buy_price)
+            print('Ordre d\'achat placé:', buy_order)
+
+        # Vérifier si suffisamment de RNDR sont disponibles pour placer un ordre de vente
+        rndr_balance = get_available_balance('RNDR')
+        if rndr_balance >= trade_amount:
+            # Placer un ordre de vente
+            sell_order = place_sell_order(product_id, trade_amount, sell_price)
+            print('Ordre de vente placé:', sell_order)
+
+        # Attendre un certain laps de temps avant de passer à la prochaine itération
+        time.sleep(60)  # Attendre 1 minute
+
+# Exécuter le bot de trading
+run_trading_bot()
