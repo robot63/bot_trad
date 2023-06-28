@@ -1,77 +1,48 @@
-import cbpro
-import time
-
 import json
+import time
+import cbpro
+import ta
 
-# Chemin vers le fichier de configuration
-config_file = '/path/to/config.json'
+# Charger les clés API à partir du fichier secret.json
+with open('secret.json', 'r') as f:
+    secrets = json.load(f)
 
-# Charger les clés d'API à partir du fichier de configuration
-with open(config_file) as f:
-    config = json.load(f)
-    API_KEY = config['api_key']
-    API_SECRET = config['api_secret']
-    API_PASSPHRASE = config['api_passphrase']
+API_KEY = secrets['API_KEY']
+API_SECRET = secrets['API_SECRET']
+API_PASSPHRASE = secrets['API_PASSPHRASE']
 
-# Initialisation du client Coinbase
+# Initialiser la connexion à l'API Coinbase Pro
 auth_client = cbpro.AuthenticatedClient(API_KEY, API_SECRET, API_PASSPHRASE)
 
+# Paramètres des Bandes de Bollinger
+time_period = 20
+num_std_devs = 2
 
-# Fonction pour placer un ordre d'achat
-def place_buy_order(product_id, amount, price):
-    response = auth_client.place_limit_order(
-        product_id=product_id,
-        side='buy',
-        price=price,
-        size=amount
-    )
-    return response
+while True:
+    try:
+        # Obtenir les données historiques du RNDR
+        historical_data = auth_client.get_product_historic_rates('RNDR-USD', granularity=86400)
+        close_prices = [float(data[4]) for data in historical_data]
 
-# Fonction pour placer un ordre de vente
-def place_sell_order(product_id, amount, price):
-    response = auth_client.place_limit_order(
-        product_id=product_id,
-        side='sell',
-        price=price,
-        size=amount
-    )
-    return response
+        # Calculer les Bandes de Bollinger
+        bollinger_bands = ta.volatility.BollingerBands(close=close_prices, window=time_period, window_dev=num_std_devs)
 
-# Fonction pour récupérer le solde disponible
-def get_available_balance(currency):
-    accounts = auth_client.get_accounts()
-    for account in accounts:
-        if account['currency'] == currency:
-            return float(account['available'])
+        # Obtenir le dernier prix du RNDR
+        ticker = auth_client.get_product_ticker(product_id='RNDR-USD')
+        last_price = float(ticker['price'])
 
-    return 0.0
+        # Vérifier si le prix se rapproche des limites supérieures ou inférieures des Bandes de Bollinger
+        if last_price > bollinger_bands.bollinger_hband_indicator().iloc[-1]:
+            # Effectuer une action en cas de signal d'achat
+            print("Signal d'achat détecté !")
 
-# Fonction principale du bot de trading
-def run_trading_bot():
-    product_id = 'RNDR-USD'  # Paire de trading RNDR-USD
-    trade_amount = 10.0  # Montant de chaque transaction
-    buy_price = 0.5  # Prix d'achat
-    sell_price = 1.0  # Prix de vente
+        elif last_price < bollinger_bands.bollinger_lband_indicator().iloc[-1]:
+            # Effectuer une action en cas de signal de vente
+            print("Signal de vente détecté !")
 
-    while True:
-        # Vérifier le solde disponible
-        available_balance = get_available_balance('USD')
+        # Attendre un certain temps avant de vérifier à nouveau
+        time.sleep(60)  # Attendre 1 minute avant la prochaine vérification
 
-        # Vérifier si suffisamment de fonds sont disponibles pour placer un ordre d'achat
-        if available_balance >= trade_amount * buy_price:
-            # Placer un ordre d'achat
-            buy_order = place_buy_order(product_id, trade_amount, buy_price)
-            print('Ordre d\'achat placé:', buy_order)
-
-        # Vérifier si suffisamment de RNDR sont disponibles pour placer un ordre de vente
-        rndr_balance = get_available_balance('RNDR')
-        if rndr_balance >= trade_amount:
-            # Placer un ordre de vente
-            sell_order = place_sell_order(product_id, trade_amount, sell_price)
-            print('Ordre de vente placé:', sell_order)
-
-        # Attendre un certain laps de temps avant de passer à la prochaine itération
-        time.sleep(60)  # Attendre 1 minute
-
-# Exécuter le bot de trading
-run_trading_bot()
+    except Exception as e:
+        print(f"Une erreur s'est produite : {e}")
+        time.sleep(60)  # Attendre 1 minute en cas d'erreur pour éviter une boucle infinie de requêtes
